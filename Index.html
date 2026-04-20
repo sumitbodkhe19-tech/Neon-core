@@ -1,0 +1,415 @@
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEON OVERDRIVE - Pro Protocol</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+        
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Orbitron', sans-serif; color: #fff; }
+        canvas { display: block; }
+        
+        .ui-glass {
+            background: rgba(0, 5, 15, 0.85);
+            backdrop-filter: blur(25px);
+            border: 1px solid rgba(0, 255, 255, 0.4);
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
+        }
+
+        #video-container {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            width: 160px;
+            height: 120px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 2px solid #0ff;
+            z-index: 100;
+            transform: scaleX(-1);
+            opacity: 0.8;
+            box-shadow: 0 0 20px #0ff;
+        }
+
+        .screen-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: radial-gradient(circle at center, rgba(0,20,40,0.4) 0%, rgba(0,0,0,1) 100%);
+            z-index: 1000;
+        }
+
+        .btn-launch {
+            padding: 1.5rem 5rem;
+            background: #0ff;
+            color: #000;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.5em;
+            clip-path: polygon(10% 0, 100% 0, 90% 100%, 0 100%);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .btn-launch:hover {
+            box-shadow: 0 0 50px #0ff;
+            background: #fff;
+        }
+
+        #hud {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .hidden-ui { display: none !important; }
+        
+        .scanline {
+            width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 255, 255, 0.03) 50%);
+            background-size: 100% 4px;
+            position: absolute;
+            pointer-events: none;
+            z-index: 1001;
+        }
+
+        @keyframes glitch {
+            0% { transform: translate(0); filter: hue-rotate(0deg); }
+            10% { transform: translate(-5px, 5px); filter: hue-rotate(90deg); }
+            20% { transform: translate(5px, -5px); }
+            100% { transform: translate(0); filter: hue-rotate(0deg); }
+        }
+        .crash-shake { animation: glitch 0.15s infinite; }
+    </style>
+</head>
+<body>
+
+    <div class="scanline"></div>
+
+    <div id="start-screen" class="screen-overlay">
+        <h1 class="text-8xl font-black italic tracking-tighter mb-4 text-white">NEON<span class="text-cyan-400">CORE</span></h1>
+        <p class="text-cyan-400/50 uppercase tracking-[1em] text-[10px] mb-16">Advanced Neural Link // 0-Latency Engine</p>
+        <button id="start-btn" class="btn-launch hidden-ui">Initialize</button>
+        <p id="loading-text" class="text-white/30 text-[10px] uppercase tracking-widest animate-pulse">Syncing Sensors...</p>
+        <p id="auto-start-msg" class="mt-4 text-[11px] text-cyan-400 font-bold uppercase tracking-widest hidden-ui">LINK STABLE // SHOW HAND TO START</p>
+    </div>
+
+    <div id="hud" class="hidden-ui">
+        <div class="flex justify-between items-start">
+            <div class="ui-glass p-6 border-l-4 border-cyan-400 flex gap-10">
+                <div>
+                    <p class="text-[9px] text-cyan-400 font-bold mb-1">LATENCY</p>
+                    <p id="signal-status" class="text-sm font-mono text-green-400">0.04ms</p>
+                </div>
+                <div class="border-l border-white/10 pl-10">
+                    <p class="text-[9px] text-yellow-400 font-bold mb-1">BEST RECORD</p>
+                    <p id="high-score-val" class="text-sm font-mono">0.00m</p>
+                </div>
+            </div>
+            <div class="text-right">
+                <p class="text-[10px] text-white/40 mb-1 font-bold italic">DISTANCE TRAVERSED</p>
+                <div class="flex items-baseline justify-end gap-2">
+                    <p id="score-val" class="text-8xl font-black tabular-nums tracking-tighter">0.00</p>
+                    <p class="text-cyan-400 font-bold text-2xl">m</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="flex justify-between items-end">
+            <div class="ui-glass p-6 text-[10px] space-y-2 uppercase tracking-widest">
+                <div class="flex justify-between gap-12"><span class="text-white/40">Thrust</span> <span class="text-white">Active</span></div>
+                <div class="flex justify-between gap-12"><span class="text-white/40">Shield</span> <span class="text-cyan-400">Stable</span></div>
+                <div class="text-xs font-bold pt-2 border-t border-white/10" id="speed-display">MACH 1.20</div>
+            </div>
+            <div class="text-right">
+                <p class="text-[9px] tracking-[0.6em] text-cyan-400 animate-pulse mb-2">NEURAL OVERDRIVE ACTIVE</p>
+                <div class="w-64 h-2 bg-white/5 rounded-full overflow-hidden border border-white/10">
+                    <div id="speed-bar" class="h-full bg-cyan-400 w-0 transition-all duration-100"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="video-container">
+        <video id="video-element" playsinline></video>
+    </div>
+
+    <script>
+        // --- CONSTANTS ---
+        const LANES = [-28, 0, 28];
+        const START_SPEED = 1.0; 
+        const MAX_SPEED = 5.0;
+        const SPEED_INCREMENT = 0.0001;
+        const SPAWN_Z = -1500;
+        
+        // --- GLOBALS ---
+        let scene, camera, renderer, player, grid, clock, audioCtx;
+        let obstacles = [], clouds = [], speedLines = [];
+        let isPlaying = false, speed = START_SPEED, score = 0, highScore = 0, targetX = 0;
+        let spawnTimeout, hasAutoStarted = false;
+
+        // --- AUDIO ENGINE ---
+        function initAudio() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        function playBuzz() {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(120, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.4);
+            
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.4);
+            
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.4);
+        }
+
+        // --- THREE.JS SETUP ---
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000105);
+            scene.fog = new THREE.FogExp2(0x000105, 0.0005);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 5000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            scene.add(new THREE.AmbientLight(0x002244, 1));
+            const pLight = new THREE.PointLight(0x00ffff, 2, 1000);
+            pLight.position.set(0, 50, 50);
+            scene.add(pLight);
+
+            // Environment: Parallax Clouds
+            const cloudGeo = new THREE.SphereGeometry(10, 8, 8);
+            for(let i=0; i<60; i++) {
+                const cloudMat = new THREE.MeshBasicMaterial({
+                    color: i % 2 === 0 ? 0x00ffff : 0xff00ff,
+                    transparent: true, opacity: 0.05
+                });
+                const m = new THREE.Mesh(cloudGeo, cloudMat);
+                m.position.set((Math.random()-0.5)*3000, (Math.random()-0.5)*1000, -Math.random()*4000);
+                m.scale.set(Math.random()*30, Math.random()*20, 1);
+                scene.add(m);
+                clouds.push(m);
+            }
+
+            // Grid
+            grid = new THREE.GridHelper(10000, 120, 0x00ffff, 0x000810);
+            grid.position.y = -10;
+            scene.add(grid);
+
+            // Speed Lines (Visual Adv)
+            const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.1 });
+            const lineGeo = new THREE.BoxGeometry(0.1, 0.1, 50);
+            for(let i=0; i<100; i++) {
+                const l = new THREE.Mesh(lineGeo, lineMat);
+                l.position.set((Math.random()-0.5)*1000, (Math.random()-0.5)*500, -Math.random()*2000);
+                scene.add(l);
+                speedLines.push(l);
+            }
+
+            // Player: Cyber-Cube
+            player = new THREE.Group();
+            const core = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 6), new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x00ffff, emissiveIntensity: 1 }));
+            const frame = new THREE.Mesh(new THREE.BoxGeometry(7, 7, 7), new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true }));
+            player.add(core, frame);
+            
+            const engineLight = new THREE.PointLight(0x00ffff, 5, 100);
+            engineLight.position.set(0, -5, 5);
+            player.add(engineLight);
+            
+            scene.add(player);
+
+            camera.position.set(0, 35, 90);
+            camera.lookAt(0, 10, -100);
+
+            clock = new THREE.Clock();
+            window.addEventListener('resize', onResize);
+        }
+
+        async function initAI() {
+            const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+            hands.setOptions({ 
+                maxNumHands: 1, 
+                modelComplexity: 1, // Higher complexity for smoother tracking
+                minDetectionConfidence: 0.7, 
+                minTrackingConfidence: 0.7 
+            });
+            
+            hands.onResults(results => {
+                if (results.multiHandLandmarks?.length > 0) {
+                    if (!isPlaying && !hasAutoStarted) {
+                        hasAutoStarted = true;
+                        document.getElementById('auto-start-msg').innerText = "NEURAL SYNC DETECTED...";
+                        setTimeout(() => { if (!isPlaying) startGame(); }, 1000); 
+                    }
+                    // Mirror hand movement
+                    const x = 1 - results.multiHandLandmarks[0][8].x;
+                    // Precise lane targeting or fluid movement? Let's do fluid with lane snapping
+                    const rawX = (x - 0.5) * 120;
+                    targetX = THREE.MathUtils.clamp(rawX, -45, 45);
+                }
+            });
+
+            const vid = document.getElementById('video-element');
+            const cam = new Camera(vid, { onFrame: async () => await hands.send({image: vid}), width: 640, height: 480 });
+            cam.start().then(() => {
+                document.getElementById('loading-text').classList.add('hidden-ui');
+                document.getElementById('start-btn').classList.remove('hidden-ui');
+                document.getElementById('auto-start-msg').classList.remove('hidden-ui');
+            });
+        }
+
+        function spawnObstacle() {
+            if (!isPlaying) return;
+            
+            const isGoliath = Math.random() > 0.4;
+            let obs;
+            
+            if (isGoliath) {
+                const size = 15 + Math.random() * 15;
+                obs = new THREE.Mesh(
+                    new THREE.IcosahedronGeometry(size, 0),
+                    new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xff0044, emissiveIntensity: 4, flatShading: true })
+                );
+                obs.position.set(LANES[Math.floor(Math.random()*3)], size/2, SPAWN_Z);
+            } else {
+                obs = new THREE.Mesh(
+                    new THREE.BoxGeometry(70, 6, 6),
+                    new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x00ffff, emissiveIntensity: 5 })
+                );
+                obs.position.set(0, 12, SPAWN_Z);
+            }
+            
+            scene.add(obs);
+            obstacles.push(obs);
+            spawnTimeout = setTimeout(spawnObstacle, Math.max(300, 1200 - (speed * 150)));
+        }
+
+        function update() {
+            if (!isPlaying) return;
+            const dt = clock.getDelta();
+            
+            score += speed * 0.4;
+            document.getElementById('score-val').innerText = score.toFixed(2);
+            if(score > highScore) {
+                highScore = score;
+                document.getElementById('high-score-val').innerText = highScore.toFixed(2) + "m";
+            }
+            
+            if(speed < MAX_SPEED) speed += SPEED_INCREMENT;
+            document.getElementById('speed-display').innerText = `MACH ${(speed + 0.2).toFixed(2)}`;
+            document.getElementById('speed-bar').style.width = `${(speed/MAX_SPEED)*100}%`;
+
+            // Environment Motion
+            grid.position.z += speed * 300 * dt;
+            if (grid.position.z > 80) grid.position.z -= 80;
+
+            clouds.forEach(c => {
+                c.position.z += speed * 80 * dt;
+                if(c.position.z > 500) c.position.z = -3500;
+            });
+
+            speedLines.forEach(l => {
+                l.position.z += speed * 800 * dt;
+                if(l.position.z > 200) l.position.z = -2000;
+            });
+
+            // RESPONSIVE MOVEMENT: Higher LERP for "Quick Follow"
+            const oldX = player.position.x;
+            player.position.x = THREE.MathUtils.lerp(player.position.x, targetX, 0.25); // Faster follow
+            player.rotation.z = -(player.position.x - oldX) * 0.4;
+            player.rotation.x += 0.05;
+            player.rotation.y += 0.05;
+            player.position.y = 8 + Math.sin(Date.now()*0.005) * 3;
+
+            // Collisions
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const o = obstacles[i];
+                o.position.z += speed * 450 * dt;
+                
+                const dx = Math.abs(o.position.x - player.position.x);
+                const dz = Math.abs(o.position.z - player.position.z);
+                const hitWidth = o.geometry.type === 'BoxGeometry' ? 35 : 18;
+
+                if (dx < hitWidth && dz < 8) {
+                    gameOver();
+                }
+
+                if (o.position.z > 300) {
+                    scene.remove(o);
+                    obstacles.splice(i, 1);
+                }
+            }
+        }
+
+        function startGame() {
+            initAudio();
+            if (isPlaying) return;
+            isPlaying = true;
+            score = 0;
+            speed = START_SPEED;
+            obstacles.forEach(o => scene.remove(o));
+            obstacles = [];
+            document.getElementById('start-screen').classList.add('hidden-ui');
+            document.getElementById('hud').classList.remove('hidden-ui');
+            spawnObstacle();
+        }
+
+        function gameOver() {
+            isPlaying = false;
+            hasAutoStarted = false; 
+            playBuzz();
+            clearTimeout(spawnTimeout);
+            
+            document.body.classList.add('crash-shake');
+            setTimeout(() => document.body.classList.remove('crash-shake'), 600);
+
+            document.getElementById('start-screen').classList.remove('hidden-ui');
+            document.getElementById('auto-start-msg').innerText = "CONNECTION INTERRUPTED // SHOW HAND TO RE-SYNC";
+            document.getElementById('hud').classList.add('hidden-ui');
+            document.getElementById('start-btn').innerText = "RE-INITIALIZE";
+        }
+
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        init();
+        initAI();
+        function loop() {
+            requestAnimationFrame(loop);
+            update();
+            renderer.render(scene, camera);
+        }
+        loop();
+
+        document.getElementById('start-btn').onclick = startGame;
+    </script>
+</body>
+</html>
